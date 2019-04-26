@@ -2090,6 +2090,7 @@ static void getKeySizes(redisReply *keys, int *types,
     }
 }
 
+//利用scan命令获取当前db各个类型数据的最大key
 static void findBigKeys(void) {
     unsigned long long biggest[5] = {0}, counts[5] = {0}, totalsize[5] = {0};
     unsigned long long sampled = 0, total_keys, totlen=0, *sizes=NULL, it=0;
@@ -2178,6 +2179,7 @@ static void findBigKeys(void) {
         }
 
         /* Sleep if we've been directed to do so */
+        //每扫一百个key sleep interval微秒
         if(sampled && (sampled %100) == 0 && config.interval) {
             usleep(config.interval);
         }

@@ -978,7 +978,8 @@ unsigned char *zzlInsert(unsigned char *zl, robj *ele, double score) {
     double s;
 
     ele = getDecodedObject(ele);
-    while (eptr != NULL) {
+    while (eptr != NULL) { 
+        //用于zset的ziplist按score从小到大排列，找到合适的插入位置
         sptr = ziplistNext(zl,eptr);
         serverAssertWithInfo(NULL,ele,sptr != NULL);
         s = zzlGetScore(sptr);
@@ -1247,20 +1248,20 @@ void zaddGenericCommand(client *c, int flags) {
     /* After the options, we expect to have an even number of args, since
      * we expect any number of score-element pairs. */
     elements = c->argc-scoreidx;
-    if (elements % 2 || !elements) {
+    if (elements % 2 || !elements) { //member和score的总数必须是偶数才匹配
         addReply(c,shared.syntaxerr);
         return;
     }
     elements /= 2; /* Now this holds the number of score-element pairs. */
 
     /* Check for incompatible options. */
-    if (nx && xx) {
+    if (nx && xx) { //nx和xx是互斥的
         addReplyError(c,
             "XX and NX options at the same time are not compatible");
         return;
     }
 
-    if (incr && elements > 1) {
+    if (incr && elements > 1) { //incr指令只能一次操作一个member/score对
         addReplyError(c,
             "INCR option supports a single increment-element pair");
         return;
@@ -1269,7 +1270,7 @@ void zaddGenericCommand(client *c, int flags) {
     /* Start parsing all the scores, we need to emit any syntax error
      * before executing additions to the sorted set, as the command should
      * either execute fully or nothing at all. */
-    scores = zmalloc(sizeof(double)*elements);
+    scores = zmalloc(sizeof(double)*elements); //把所有score(object类型)以double的形式丢进scores数组
     for (j = 0; j < elements; j++) {
         if (getDoubleFromObjectOrReply(c,c->argv[scoreidx+j*2],&scores[j],NULL)
             != C_OK) goto cleanup;
@@ -1282,9 +1283,9 @@ void zaddGenericCommand(client *c, int flags) {
         if (server.zset_max_ziplist_entries == 0 ||
             server.zset_max_ziplist_value < sdslen(c->argv[scoreidx+1]->ptr))
         {
-            zobj = createZsetObject();
+            zobj = createZsetObject(); //zskiplist
         } else {
-            zobj = createZsetZiplistObject();
+            zobj = createZsetZiplistObject(); //ziplist
         }
         dbAdd(c->db,key,zobj);
     } else {
@@ -1301,8 +1302,8 @@ void zaddGenericCommand(client *c, int flags) {
             unsigned char *eptr;
 
             /* Prefer non-encoded element when dealing with ziplists. */
-            ele = c->argv[scoreidx+1+j*2];
-            if ((eptr = zzlFind(zobj->ptr,ele,&curscore)) != NULL) {
+            ele = c->argv[scoreidx+1+j*2]; //member的object
+            if ((eptr = zzlFind(zobj->ptr,ele,&curscore)) != NULL) { //key里找到了该member
                 if (nx) continue;
                 if (incr) {
                     score += curscore;
@@ -1314,8 +1315,8 @@ void zaddGenericCommand(client *c, int flags) {
 
                 /* Remove and re-insert when score changed. */
                 if (score != curscore) {
-                    zobj->ptr = zzlDelete(zobj->ptr,eptr);
-                    zobj->ptr = zzlInsert(zobj->ptr,ele,score);
+                    zobj->ptr = zzlDelete(zobj->ptr,eptr); // 删掉member和score两个entry
+                    zobj->ptr = zzlInsert(zobj->ptr,ele,score); //根据新的score的大小，找到合适的位置插入member和score
                     server.dirty++;
                     updated++;
                 }
@@ -1338,9 +1339,9 @@ void zaddGenericCommand(client *c, int flags) {
             dictEntry *de;
 
             ele = c->argv[scoreidx+1+j*2] =
-                tryObjectEncoding(c->argv[scoreidx+1+j*2]);
-            de = dictFind(zs->dict,ele);
-            if (de != NULL) {
+                tryObjectEncoding(c->argv[scoreidx+1+j*2]); //尽可能地缩小member字符串的encoding
+            de = dictFind(zs->dict,ele); //在该key中找ele member
+            if (de != NULL) { //ele已存在与key中
                 if (nx) continue;
                 curobj = dictGetKey(de);
                 curscore = *(double*)dictGetVal(de);
@@ -1359,18 +1360,18 @@ void zaddGenericCommand(client *c, int flags) {
                  * delete the key object from the skiplist, since the
                  * dictionary still has a reference to it. */
                 if (score != curscore) {
-                    serverAssertWithInfo(c,curobj,zslDelete(zs->zsl,curscore,curobj));
-                    znode = zslInsert(zs->zsl,score,curobj);
+                    serverAssertWithInfo(c,curobj,zslDelete(zs->zsl,curscore,curobj)); //从skiplist中删掉score/member对
+                    znode = zslInsert(zs->zsl,score,curobj); //插入新的
                     incrRefCount(curobj); /* Re-inserted in skiplist. */
-                    dictGetVal(de) = &znode->score; /* Update score ptr. */
+                    dictGetVal(de) = &znode->score; //更新zset中dict对应member的分数
                     server.dirty++;
                     updated++;
                 }
                 processed++;
-            } else if (!xx) {
+            } else if (!xx) { //ele不存在于key中
                 znode = zslInsert(zs->zsl,score,ele);
                 incrRefCount(ele); /* Inserted in skiplist. */
-                serverAssertWithInfo(c,NULL,dictAdd(zs->dict,ele,&znode->score) == DICT_OK);
+                serverAssertWithInfo(c,NULL,dictAdd(zs->dict,ele,&znode->score) == DICT_OK); //插入zset中dict对应member的分数
                 incrRefCount(ele); /* Added to dictionary. */
                 server.dirty++;
                 added++;

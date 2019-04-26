@@ -187,9 +187,9 @@ void setKey(redisDb *db, robj *key, robj *val) {
     } else {
         dbOverwrite(db,key,val);
     }
-    incrRefCount(val);
-    removeExpire(db,key);
-    signalModifiedKey(db,key);
+    incrRefCount(val); //val对象的引用计数+1
+    removeExpire(db,key); //移除key原本的过期时间
+    signalModifiedKey(db,key); //如果key正在被watch，则通知那个watch它的事务
 }
 
 int dbExists(redisDb *db, robj *key) {

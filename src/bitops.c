@@ -530,7 +530,7 @@ void setbitCommand(client *c) {
         return;
 
     /* Bits can only be set or cleared... */
-    if (on & ~1) {
+    if (on & ~1) { //value只能是0、1
         addReplyError(c,err);
         return;
     }
@@ -538,10 +538,10 @@ void setbitCommand(client *c) {
     if ((o = lookupStringForBitCommand(c,bitoffset)) == NULL) return;
 
     /* Get current values */
-    byte = bitoffset >> 3;
-    byteval = ((uint8_t*)o->ptr)[byte];
-    bit = 7 - (bitoffset & 0x7);
-    bitval = byteval & (1 << bit);
+    byte = bitoffset >> 3;//bitoffset/8,找到当前bit所在的byte
+    byteval = ((uint8_t*)o->ptr)[byte]; //该byte的值
+    bit = 7 - (bitoffset & 0x7); //7-bitoffset%8, bit所在byte的第几位
+    bitval = byteval & (1 << bit); //该bit的值
 
     /* Update byte with new bit value and return original value */
     byteval &= ~(1 << bit);

@@ -455,7 +455,7 @@ void appendCommand(client *c) {
             return;
 
         /* Append the value */
-        o = dbUnshareStringValue(c->db,c->argv[1],o);
+        o = dbUnshareStringValue(c->db,c->argv[1],o); //append底层操作(会将sds的encoding变为raw)
         o->ptr = sdscatlen(o->ptr,append->ptr,sdslen(append->ptr));
         totlen = sdslen(o->ptr);
     }

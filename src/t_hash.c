@@ -37,6 +37,7 @@
 /* Check the length of a number of objects to see if we need to convert a
  * ziplist to a real hash. Note that we only check string encoded objects
  * as their string length can be queried in constant time. */
+//若encoding是ziplist，并且本次要加入的filed或value字符串长度超过hash_max_ziplist_value(64)则立刻将ziplist转换成dict
 void hashTypeTryConversion(robj *o, robj **argv, int start, int end) {
     int i;
 
@@ -53,6 +54,7 @@ void hashTypeTryConversion(robj *o, robj **argv, int start, int end) {
 }
 
 /* Encode given objects in-place when the hash uses a dict. */
+//encoding为dict时尝试重新encode filed和value的字符串对象 以节省内存(ziplist不用压缩 因为ziplist里存的就不是对象而是裸字符串)，更重要的是hash的encoding为dict时，统一了字符串对象的encoding，方便查找filed(比较字符串对象)
 void hashTypeTryObjectEncoding(robj *subject, robj **o1, robj **o2) {
     if (subject->encoding == OBJ_ENCODING_HT) {
         if (o1) *o1 = tryObjectEncoding(*o1);
@@ -189,25 +191,30 @@ int hashTypeExists(robj *o, robj *field) {
  * Return 0 on insert and 1 on update.
  * This function will take care of incrementing the reference count of the
  * retained fields and value objects. */
+//将field、value加入type为hash的redisObject o
+//返回0 表示插入
+//返回1 表示更新
 int hashTypeSet(robj *o, robj *field, robj *value) {
     int update = 0;
 
     if (o->encoding == OBJ_ENCODING_ZIPLIST) {
         unsigned char *zl, *fptr, *vptr;
 
+        //将filed和value字符串对象转换成EMBSTR或RAW类型，为了下文获取字符串长度执行sdslen()
         field = getDecodedObject(field);
         value = getDecodedObject(value);
 
         zl = o->ptr;
         fptr = ziplistIndex(zl, ZIPLIST_HEAD);
         if (fptr != NULL) {
-            fptr = ziplistFind(fptr, field->ptr, sdslen(field->ptr), 1);
-            if (fptr != NULL) {
+            fptr = ziplistFind(fptr, field->ptr, sdslen(field->ptr), 1); //间隔为1，跳过value找field
+            if (fptr != NULL) { //field存在
                 /* Grab pointer to the value (fptr points to the field) */
-                vptr = ziplistNext(zl, fptr);
+                vptr = ziplistNext(zl, fptr); //field的下一个就是entry就是value
                 serverAssert(vptr != NULL);
-                update = 1;
+                update = 1; //此次hSet行为是"更新",update字段置为1
 
+                //更新value(删除旧value节点，插入新value节点)
                 /* Delete value */
                 zl = ziplistDelete(zl, &vptr);
 
@@ -216,8 +223,9 @@ int hashTypeSet(robj *o, robj *field, robj *value) {
             }
         }
 
-        if (!update) {
+        if (!update) { //上面的操作没在ziplist里找到field，此次hSet行为是"写入"
             /* Push new field/value pair onto the tail of the ziplist */
+            //将新的filed节点和value节点push进ziplist的尾部
             zl = ziplistPush(zl, field->ptr, sdslen(field->ptr), ZIPLIST_TAIL);
             zl = ziplistPush(zl, value->ptr, sdslen(value->ptr), ZIPLIST_TAIL);
         }
@@ -226,7 +234,7 @@ int hashTypeSet(robj *o, robj *field, robj *value) {
         decrRefCount(value);
 
         /* Check if the ziplist needs to be converted to a hash table */
-        if (hashTypeLength(o) > server.hash_max_ziplist_entries)
+        if (hashTypeLength(o) > server.hash_max_ziplist_entries) //512
             hashTypeConvert(o, OBJ_ENCODING_HT);
     } else if (o->encoding == OBJ_ENCODING_HT) {
         if (dictReplace(o->ptr, field, value)) { /* Insert */
@@ -416,17 +424,17 @@ robj *hashTypeCurrentObject(hashTypeIterator *hi, int what) {
 }
 
 robj *hashTypeLookupWriteOrCreate(client *c, robj *key) {
-    robj *o = lookupKeyWrite(c->db,key);
+    robj *o = lookupKeyWrite(c->db,key); //确认key是否已经存在于db
     if (o == NULL) {
-        o = createHashObject();
-        dbAdd(c->db,key,o);
+        o = createHashObject(); //创建以ziplist为encoding的hash对象
+        dbAdd(c->db,key,o); //把key加入db里
     } else {
-        if (o->type != OBJ_HASH) {
+        if (o->type != OBJ_HASH) { //类型错误
             addReply(c,shared.wrongtypeerr);
             return NULL;
         }
     }
-    return o;
+    return o; //key已经存在并且满足写入的类型要求
 }
 
 void hashTypeConvertZiplist(robj *o, int enc) {
@@ -487,10 +495,10 @@ void hsetCommand(client *c) {
     int update;
     robj *o;
 
-    if ((o = hashTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return;
-    hashTypeTryConversion(o,c->argv,2,3);
-    hashTypeTryObjectEncoding(o,&c->argv[2], &c->argv[3]);
-    update = hashTypeSet(o,c->argv[2],c->argv[3]);
+    if ((o = hashTypeLookupWriteOrCreate(c,c->argv[1])) == NULL) return; 
+    hashTypeTryConversion(o,c->argv,2,3); //如果key和filed里存的字符串太长，则直接将类型hash的encoding转换成dict
+    hashTypeTryObjectEncoding(o,&c->argv[2], &c->argv[3]); //encoding为dict时尽可能缩小field和value字符串对象的encoding
+    update = hashTypeSet(o,c->argv[2],c->argv[3]); //将filed和value加入hashtable
     addReply(c, update ? shared.czero : shared.cone);
     signalModifiedKey(c->db,c->argv[1]);
     notifyKeyspaceEvent(NOTIFY_HASH,"hset",c->argv[1],c->db->id);

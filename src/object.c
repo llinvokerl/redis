@@ -57,9 +57,15 @@ robj *createRawStringObject(const char *ptr, size_t len) {
 /* Create a string object with encoding OBJ_ENCODING_EMBSTR, that is
  * an object where the sds string is actually an unmodifiable string
  * allocated in the same chunk as the object itself. */
+//redisObject类型跟sds类型一起分配空间，内存上挨在一起，sds的内容不能被改变
+//因为改变之后sds有可能重新申请一块内存，不能继续挨着
+/**
+ * @param ptr: 需要初始化字符串的地址
+ * @param len: 需要初始化字符串的长度
+ */
 robj *createEmbeddedStringObject(const char *ptr, size_t len) {
     robj *o = zmalloc(sizeof(robj)+sizeof(struct sdshdr8)+len+1);
-    struct sdshdr8 *sh = (void*)(o+1);
+    struct sdshdr8 *sh = (void*)(o+1); //sds空间上紧挨着它的redisObject
 
     o->type = OBJ_STRING;
     o->encoding = OBJ_ENCODING_EMBSTR;
@@ -71,10 +77,10 @@ robj *createEmbeddedStringObject(const char *ptr, size_t len) {
     sh->alloc = len;
     sh->flags = SDS_TYPE_8;
     if (ptr) {
-        memcpy(sh->buf,ptr,len);
+        memcpy(sh->buf,ptr,len); //赋值
         sh->buf[len] = '\0';
     } else {
-        memset(sh->buf,0,len+1);
+        memset(sh->buf,0,len+1); //sds初始化为0
     }
     return o;
 }
@@ -86,23 +92,24 @@ robj *createEmbeddedStringObject(const char *ptr, size_t len) {
  * The current limit of 39 is chosen so that the biggest string object
  * we allocate as EMBSTR will still fit into the 64 byte arena of jemalloc. */
 #define OBJ_ENCODING_EMBSTR_SIZE_LIMIT 44
+//创建字符串sds
 robj *createStringObject(const char *ptr, size_t len) {
     if (len <= OBJ_ENCODING_EMBSTR_SIZE_LIMIT)
         return createEmbeddedStringObject(ptr,len);
     else
         return createRawStringObject(ptr,len);
 }
-
+//创建整数sds
 robj *createStringObjectFromLongLong(long long value) {
     robj *o;
-    if (value >= 0 && value < OBJ_SHARED_INTEGERS) {
+    if (value >= 0 && value < OBJ_SHARED_INTEGERS) { //预留0-9999的字符串对象供redis内部直接使用
         incrRefCount(shared.integers[value]);
         o = shared.integers[value];
     } else {
         if (value >= LONG_MIN && value <= LONG_MAX) {
             o = createObject(OBJ_STRING, NULL);
             o->encoding = OBJ_ENCODING_INT;
-            o->ptr = (void*)((long)value);
+            o->ptr = (void*)((long)value); //没有创建sds，而是直接用这个长整数
         } else {
             o = createObject(OBJ_STRING,sdsfromlonglong(value));
         }
@@ -160,6 +167,7 @@ robj *createStringObjectFromLongDouble(long double value, int humanfriendly) {
  * will always result in a fresh object that is unshared (refcount == 1).
  *
  * The resulting object always has refcount set to 1. */
+//复制sds
 robj *dupStringObject(robj *o) {
     robj *d;
 
@@ -209,6 +217,7 @@ robj *createIntsetObject(void) {
     return o;
 }
 
+//hash键最开始的encoding都是ziplist，随着元素增多才有可能变为hash
 robj *createHashObject(void) {
     unsigned char *zl = ziplistNew();
     robj *o = createObject(OBJ_HASH, zl);
@@ -356,6 +365,10 @@ int isObjectRepresentableAsLongLong(robj *o, long long *llval) {
 }
 
 /* Try to encode a string object in order to save space */
+//尽可能缩小encoding
+/* raw->embstr */
+/* raw->int */
+/* embstr->int */
 robj *tryObjectEncoding(robj *o) {
     long value;
     sds s = o->ptr;
